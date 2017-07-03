@@ -1,11 +1,5 @@
-from functools import partial
-from typing import Callable, List
-import warnings
-
 import numpy as np
-import pandas as pd
-from scipy.stats import (multivariate_normal as mnorm,
-                         truncnorm as sp_truncnorm,
+from scipy.stats import (truncnorm as sp_truncnorm,
                          norm as sp_norm,
                          chi2)
 
@@ -15,7 +9,7 @@ def truncnorm(a, b, loc=0, scale=1):
     return sp_truncnorm(a=a, b=b, loc=loc, scale=scale)
 
 
-def gibbs(X_init: np.ndarray, iterations: int, distributions: List[Callable]) -> np.ndarray:
+def gibbs(X_init, iterations, distributions, verbose=False):
     _, M = X_init.shape
     assert M == len(distributions)
     ret_val = np.zeros((iterations, M))
@@ -25,6 +19,9 @@ def gibbs(X_init: np.ndarray, iterations: int, distributions: List[Callable]) ->
         for j in range(M):
             X[j] = distributions[j](X, j)
         ret_val[t] = X
+        if verbose and t % 10 == 0:
+            print("{}th iteration".format(t))
+            print("X: {}".format(X))
     return ret_val
 
 
@@ -41,7 +38,18 @@ def bayes_factor(β_bar, β_old, var_star, τ, υ, λ):
     return bf
 
 
-def variable_selection(X, y, β, var, p, τ, ν, υ, λ, iterations):
+def sample_β(β_bar, p, υ, λ, τ):
+    if np.random.rand() <= p:
+        return 0
+    else:
+        return truncnorm(a=υ, b=λ, loc=β_bar, scale=τ).rvs()
+
+
+def sample_var(var_bar, ν, err, N):
+    return (ν*var_bar + err)/chi2.rvs(ν + N)
+
+
+def variable_selection(X, y, β, var, p, τ, ν, υ, λ, iterations, verbose=False):
     """
     REVIEW!!!! Attempt at considering truncated normals.
     TODO: cover case with non-truncated normals.
@@ -52,29 +60,46 @@ def variable_selection(X, y, β, var, p, τ, ν, υ, λ, iterations):
     chain = np.zeros((iterations, M + 1))
     probs = np.zeros((iterations, M))
     p = p.copy()
+
+    # Sample from original priors
+    for i, b in enumerate(β):
+        β[i] = sample_β(b, p[i], υ[i], λ[i], τ[i])
+    var = sample_var(var, ν, 0, 0)
+
+    # Run sampler
     for i in range(iterations):
         for j in range(M):
             X_j = X[:, j]
             X_sq_sum = (X_j**2).sum()
             β_no_j = β.copy()
             β_no_j[j] = 0
-            z = y - (X @ np.atleast_2d(β_no_j).T).flatten()
+            β_no_j = np.atleast_2d(β_no_j)
+
+            z = y - (X.dot(β_no_j.T)).flatten()
             b = (X_j * z).sum() / X_sq_sum
             ω_sq = var / X_sq_sum
-            var_star = 1/(1/ω_sq + 1/τ[j]**2)
-            β_bar = var_star*(b/ω_sq + β[j]/(τ[j]**2))
+
+            τ_sq = τ[j]**2
+            var_star = 1/(1/ω_sq + 1/τ_sq)
+            β_bar = var_star*(b/ω_sq + β[j]/τ_sq)
+
             bf = bayes_factor(β_bar, β[j], var_star, τ[j], υ[j], λ[j])
             p_bar = p[j]/(p[j] + (1-p[j])*bf)
-            p[j] = p_bar
+            # p[j] = p_bar
             probs[i, j] = p_bar
-            if np.random.rand() <= p_bar:
-                β[j] = 0
-            else:
-                β[j] = truncnorm(a=υ[j], b=λ[j], loc=β_bar, scale=var_star).rvs()
+            β[j] = sample_β(β_bar, p_bar, υ[j], λ[j], var_star)
             chain[i, j] = β[j]
-        err = y - (X @ np.atleast_2d(β).T).flatten()
-        err = err.T @ err
-        var = (var + err)/chi2.rvs(ν + N)
+
+        err = y - (X.dot(np.atleast_2d(β).T)).flatten()
+        err = err.T.dot(err)
+        var = sample_var(var, ν, err, N)
         chain[i, M] = var
+
+        if verbose and i % (iterations/verbose) == 0:
+            print("{}th iteration".format(i))
+            print("Error: {}".format(err))
+            print("β: {}".format(β))
+            print("σ²: {}, σ: {}".format(var, var**0.5))
+            print()
 
     return β, var, chain, probs
