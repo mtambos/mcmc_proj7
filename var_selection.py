@@ -12,7 +12,7 @@ def truncnorm(a, b, loc=0, scale=1):
 def gibbs(X_init, iterations, distributions, verbose=False):
     _, M = X_init.shape
     assert M == len(distributions)
-    ret_val = np.zeros((iterations, M))
+    ret_val = np.zeros((iterations, M), dtype=float)
     ret_val[0] = X_init
     for t in range(1, iterations):
         X = ret_val[t - 1].copy()
@@ -42,11 +42,51 @@ def sample_β(β_bar, p, υ, λ, τ):
     if np.random.rand() <= p:
         return 0
     else:
-        return truncnorm(a=υ, b=λ, loc=β_bar, scale=τ).rvs()
+        return truncnorm(a=λ, b=υ, loc=β_bar, scale=τ).rvs()
 
 
 def sample_var(var_bar, ν, err, N):
     return (ν*var_bar + err)/chi2.rvs(ν + N)
+
+
+def sample_priors(β, var, p, τ, ν, υ, λ):
+    # Sample from original priors
+    β = β.copy()
+    for i, b in enumerate(β):
+        β[i] = sample_β(b, p[i], υ[i], λ[i], τ[i])
+    var = sample_var(var, ν, 0, 0)
+    return β, var
+
+
+def sample_step(X, y, β, var, p, τ, ν, υ, λ):
+    N, M = X.shape
+    probs = np.zeros(M, dtype=float)
+    β = β.copy()
+    for j in range(M):
+        X_j = X[:, j]
+        X_sq_sum = (X_j**2).sum()
+        β_no_j = β.copy()
+        β_no_j[j] = 0
+        β_no_j = np.atleast_2d(β_no_j)
+
+        z = y - (X.dot(β_no_j.T)).flatten()
+        b = (X_j * z).sum() / X_sq_sum
+        ω_sq = var / X_sq_sum
+
+        τ_sq = τ[j]**2
+        var_star = 1/(1/ω_sq + 1/τ_sq)
+        β_bar = var_star*(b/ω_sq + β[j]/τ_sq)
+
+        bf = bayes_factor(β_bar, β[j], var_star, τ[j], υ[j], λ[j])
+        p_bar = p[j]/(p[j] + (1-p[j])*bf)
+        # p[j] = p_bar
+        probs[j] = p_bar
+        β[j] = sample_β(β_bar, p_bar, υ[j], λ[j], var_star)
+
+    err = y - (X.dot(np.atleast_2d(β).T)).flatten()
+    err = err.T.dot(err)
+    var = sample_var(var, ν, err, N)
+    return β, var, probs, err
 
 
 def variable_selection(X, y, β, var, p, τ, ν, υ, λ, iterations, verbose=False):
@@ -56,43 +96,17 @@ def variable_selection(X, y, β, var, p, τ, ν, υ, λ, iterations, verbose=Fal
     """
     N, M = X.shape
     y = y.flatten()
-    β = β.flatten()
-    chain = np.zeros((iterations, M + 1))
-    probs = np.zeros((iterations, M))
-    p = p.copy()
+    β = β.flatten().astype(float)
+    chain = np.zeros((iterations, M + 1), dtype=float)
+    probs = np.zeros((iterations, M), dtype=float)
+    p = p.copy().astype(float)
 
-    # Sample from original priors
-    for i, b in enumerate(β):
-        β[i] = sample_β(b, p[i], υ[i], λ[i], τ[i])
-    var = sample_var(var, ν, 0, 0)
+    β, var = sample_priors(β, var, p, τ, ν, υ, λ)
 
     # Run sampler
     for i in range(iterations):
-        for j in range(M):
-            X_j = X[:, j]
-            X_sq_sum = (X_j**2).sum()
-            β_no_j = β.copy()
-            β_no_j[j] = 0
-            β_no_j = np.atleast_2d(β_no_j)
-
-            z = y - (X.dot(β_no_j.T)).flatten()
-            b = (X_j * z).sum() / X_sq_sum
-            ω_sq = var / X_sq_sum
-
-            τ_sq = τ[j]**2
-            var_star = 1/(1/ω_sq + 1/τ_sq)
-            β_bar = var_star*(b/ω_sq + β[j]/τ_sq)
-
-            bf = bayes_factor(β_bar, β[j], var_star, τ[j], υ[j], λ[j])
-            p_bar = p[j]/(p[j] + (1-p[j])*bf)
-            # p[j] = p_bar
-            probs[i, j] = p_bar
-            β[j] = sample_β(β_bar, p_bar, υ[j], λ[j], var_star)
-            chain[i, j] = β[j]
-
-        err = y - (X.dot(np.atleast_2d(β).T)).flatten()
-        err = err.T.dot(err)
-        var = sample_var(var, ν, err, N)
+        β, var, probs, err = sample_step(X, y, β, var, p, τ, ν, υ, λ)
+        chain[i, :M] = β
         chain[i, M] = var
 
         if verbose and i % (iterations/verbose) == 0:
