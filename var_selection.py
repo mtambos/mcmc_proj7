@@ -1,3 +1,5 @@
+from itertools import combinations
+
 import numpy as np
 from scipy.stats import (truncnorm as sp_truncnorm,
                          norm as sp_norm,
@@ -102,10 +104,15 @@ def variable_selection(X, y, β, var, p, τ, ν, υ, λ, iterations, verbose=Fal
     p = p.copy().astype(float)
 
     β, var = sample_priors(β, var, p, τ, ν, υ, λ)
-
+    models = {tuple(sorted(c)): 0
+              for i in range(1, M+1)
+              for c in combinations(range(len(β)), i)}
+    models[tuple([])] = 0
     # Run sampler
     for i in range(iterations):
         β, var, probs, err = sample_step(X, y, β, var, p, τ, ν, υ, λ)
+        model = tuple(sorted(np.argwhere(β != 0).flatten()))
+        models[model] += 1
         chain[i, :M] = β
         chain[i, M] = var
 
@@ -116,4 +123,4 @@ def variable_selection(X, y, β, var, p, τ, ν, υ, λ, iterations, verbose=Fal
             print("σ²: {}, σ: {}".format(var, var**0.5))
             print()
 
-    return β, var, chain, probs
+    return β, var, chain, probs, models
