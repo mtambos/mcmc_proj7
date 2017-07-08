@@ -110,7 +110,7 @@ def variable_selection(X, y, β, var, p, τ, ν, υ, λ, iterations, verbose=Fal
     models[tuple([])] = 0
     # Run sampler
     for i in range(iterations):
-        β, var, probs, err = sample_step(X, y, β, var, p, τ, ν, υ, λ)
+        β, var, probs[i], err = sample_step(X, y, β, var, p, τ, ν, υ, λ)
         model = tuple(sorted(np.argwhere(β != 0).flatten()))
         models[model] += 1
         chain[i, :M] = β
