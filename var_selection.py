@@ -7,7 +7,6 @@ from scipy.stats import (truncnorm as sp_truncnorm,
 
 
 def truncnorm(a, b, loc=0, scale=1):
-	scale = np.sqrt(scale)
 	a, b = (a - loc)/scale, (b - loc)/scale
 	return sp_truncnorm(a=a, b=b, loc=loc, scale=scale)
 
@@ -84,7 +83,7 @@ def sample_step(X, y, β, var, p, τ, ν, υ, λ):
         p_bar = p[j]/(p[j] + (1-p[j])*bf)
         # p[j] = p_bar
         probs[j] = p_bar
-        β[j] = sample_β(β_bar, p_bar, υ[j], λ[j], var_star)
+        β[j] = sample_β(β_bar, p_bar, υ[j], λ[j], var_star**0.5)
 
     err = y - (X.dot(np.atleast_2d(β).T)).flatten()
     err = err.T.dot(err)
