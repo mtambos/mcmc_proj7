@@ -7,8 +7,9 @@ from scipy.stats import (truncnorm as sp_truncnorm,
 
 
 def truncnorm(a, b, loc=0, scale=1):
-    a, b = (a - loc)/scale, (b - loc)/scale
-    return sp_truncnorm(a=a, b=b, loc=loc, scale=scale)
+	scale = np.sqrt(scale)
+	a, b = (a - loc)/scale, (b - loc)/scale
+	return sp_truncnorm(a=a, b=b, loc=loc, scale=scale)
 
 
 def gibbs(X_init, iterations, distributions, verbose=False):
